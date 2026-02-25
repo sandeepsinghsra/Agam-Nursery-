@@ -27,6 +27,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     customer_name TEXT,
     customer_phone TEXT,
+    customer_address TEXT,
     total_amount REAL,
     discount REAL,
     final_amount REAL,
@@ -94,11 +95,11 @@ async function startServer() {
   });
 
   app.post("/api/sales", (req, res) => {
-    const { customer_name, customer_phone, total_amount, discount, final_amount, items } = req.body;
+    const { customer_name, customer_phone, customer_address, total_amount, discount, final_amount, items } = req.body;
     const result = db.prepare(`
-      INSERT INTO sales (customer_name, customer_phone, total_amount, discount, final_amount, items)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(customer_name, customer_phone, total_amount, discount, final_amount, JSON.stringify(items));
+      INSERT INTO sales (customer_name, customer_phone, customer_address, total_amount, discount, final_amount, items)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(customer_name, customer_phone, customer_address, total_amount, discount, final_amount, JSON.stringify(items));
     res.json({ id: result.lastInsertRowid });
   });
 

@@ -40,9 +40,14 @@ export default function App() {
   const [cart, setCart] = useState<SaleItem[]>([]);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [customerAddress, setCustomerAddress] = useState('');
   const [discount, setDiscount] = useState(0);
   const [manualTotal, setManualTotal] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Share Modal State
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [lastGeneratedSale, setLastGeneratedSale] = useState<Sale | null>(null);
 
   // Product Form State
   const [newProduct, setNewProduct] = useState({ name: '', price: '', category: '' });
@@ -157,6 +162,7 @@ export default function App() {
     const saleData = {
       customer_name: customerName,
       customer_phone: customerPhone,
+      customer_address: customerAddress,
       total_amount: subtotal,
       discount: discount,
       final_amount: finalTotal,
@@ -172,10 +178,19 @@ export default function App() {
       
       if (res.ok) {
         const { id } = await res.json();
-        alert(`Bill generated successfully! ID: ${id}`);
+        const newSale: Sale = {
+          ...saleData,
+          id,
+          created_at: new Date().toISOString()
+        };
+        
+        setLastGeneratedSale(newSale);
+        setShowShareModal(true);
+        
         setCart([]);
         setCustomerName('');
         setCustomerPhone('');
+        setCustomerAddress('');
         setDiscount(0);
         setManualTotal(null);
         fetchData();
@@ -196,6 +211,8 @@ export default function App() {
 Bill No: ${sale.id}
 Date: ${new Date(sale.created_at).toLocaleDateString()}
 Customer: ${sale.customer_name || 'N/A'}
+Phone: ${sale.customer_phone || 'N/A'}
+Address: ${sale.customer_address || 'N/A'}
 --------------------------
 ${sale.items.map(item => `${item.name} x ${item.quantity} = ₹${item.total}`).join('\n')}
 --------------------------
@@ -364,24 +381,36 @@ ${settings.phone}
                   </div>
 
                   <div className="border-t border-slate-100 pt-6 flex flex-col gap-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="flex flex-col gap-1">
-                        <label className="text-xs font-bold text-slate-400 uppercase">Customer Name</label>
-                        <input 
-                          type="text" 
-                          placeholder="Name" 
-                          value={customerName}
-                          onChange={(e) => setCustomerName(e.target.value)}
-                          className="text-sm"
-                        />
+                    <div className="grid grid-cols-1 gap-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-bold text-slate-400 uppercase">Customer Name</label>
+                          <input 
+                            type="text" 
+                            placeholder="Name" 
+                            value={customerName}
+                            onChange={(e) => setCustomerName(e.target.value)}
+                            className="text-sm"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-bold text-slate-400 uppercase">Phone Number</label>
+                          <input 
+                            type="text" 
+                            placeholder="Phone" 
+                            value={customerPhone}
+                            onChange={(e) => setCustomerPhone(e.target.value)}
+                            className="text-sm"
+                          />
+                        </div>
                       </div>
                       <div className="flex flex-col gap-1">
-                        <label className="text-xs font-bold text-slate-400 uppercase">Phone Number</label>
+                        <label className="text-xs font-bold text-slate-400 uppercase">Customer Address</label>
                         <input 
                           type="text" 
-                          placeholder="Phone" 
-                          value={customerPhone}
-                          onChange={(e) => setCustomerPhone(e.target.value)}
+                          placeholder="Address" 
+                          value={customerAddress}
+                          onChange={(e) => setCustomerAddress(e.target.value)}
                           className="text-sm"
                         />
                       </div>
@@ -649,6 +678,69 @@ ${settings.phone}
           )}
         </AnimatePresence>
       </main>
+
+      {/* Share Modal */}
+      <AnimatePresence>
+        {showShareModal && lastGeneratedSale && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="glass-card p-8 max-w-md w-full bg-white shadow-2xl"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="font-serif text-2xl font-bold text-nursery-green">Bill Generated!</h2>
+                <button 
+                  onClick={() => setShowShareModal(false)}
+                  className="p-2 hover:bg-slate-100 rounded-full transition-all"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="bg-nursery-green/5 p-4 rounded-2xl border border-nursery-green/10 mb-8">
+                <p className="text-sm text-slate-500 mb-1">Bill Amount</p>
+                <p className="text-3xl font-serif font-bold text-nursery-green">₹{lastGeneratedSale.final_amount}</p>
+                <p className="text-xs text-slate-400 mt-2">Bill No: #{lastGeneratedSale.id}</p>
+              </div>
+
+              <p className="text-sm font-bold text-slate-400 uppercase mb-4 tracking-widest">Share Bill via</p>
+              
+              <div className="grid grid-cols-3 gap-4">
+                <button 
+                  onClick={() => shareBill('whatsapp', lastGeneratedSale)}
+                  className="flex flex-col items-center gap-2 p-4 rounded-2xl bg-green-50 text-green-600 hover:bg-green-100 transition-all border border-green-100"
+                >
+                  <MessageCircle size={24} />
+                  <span className="text-xs font-bold">WhatsApp</span>
+                </button>
+                <button 
+                  onClick={() => shareBill('sms', lastGeneratedSale)}
+                  className="flex flex-col items-center gap-2 p-4 rounded-2xl bg-blue-50 text-blue-600 hover:bg-blue-100 transition-all border border-blue-100"
+                >
+                  <Smartphone size={24} />
+                  <span className="text-xs font-bold">SMS</span>
+                </button>
+                <button 
+                  onClick={() => shareBill('email', lastGeneratedSale)}
+                  className="flex flex-col items-center gap-2 p-4 rounded-2xl bg-slate-50 text-slate-600 hover:bg-slate-100 transition-all border border-slate-100"
+                >
+                  <Mail size={24} />
+                  <span className="text-xs font-bold">Email</span>
+                </button>
+              </div>
+
+              <button 
+                onClick={() => setShowShareModal(false)}
+                className="w-full mt-8 py-3 text-slate-500 font-medium hover:text-slate-800 transition-all"
+              >
+                Close
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
