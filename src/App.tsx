@@ -25,6 +25,8 @@ import {
   Menu
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
 import { Product, Settings, SaleItem, Sale } from './types';
 
 export default function App() {
@@ -48,6 +50,8 @@ export default function App() {
   const [discount, setDiscount] = useState(0);
   const [manualTotal, setManualTotal] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [editingQuantityId, setEditingQuantityId] = useState<number | null>(null);
+  const [tempQuantity, setTempQuantity] = useState<string>('');
   
   // Share Modal State
   const [showShareModal, setShowShareModal] = useState(false);
@@ -285,41 +289,228 @@ export default function App() {
     });
   }, [sales, historySearch, startDate, endDate]);
 
-  const shareBill = (type: 'whatsapp' | 'email' | 'sms', sale: Sale) => {
-    const billText = `
-*${settings.shop_name}*
-Bill No: ${sale.id}
-Date: ${new Date(sale.created_at).toLocaleDateString()}
-Customer: ${sale.customer_name || 'N/A'}
-Phone: ${sale.customer_phone || 'N/A'}
-Address: ${sale.customer_address || 'N/A'}
---------------------------
-${sale.items.map(item => `${item.name} x ${item.quantity} = ₹${item.total}`).join('\n')}
---------------------------
-Subtotal: ₹${sale.total_amount}
-Discount: ₹${sale.discount}
-*Total: ₹${sale.final_amount}*
---------------------------
-Thank you for shopping with us!
-${settings.address}
-${settings.phone}
-    `.trim();
-
-    const encodedText = encodeURIComponent(billText);
+  const formatWhatsAppNumber = (phone: string) => {
+    // Remove any non-numeric characters
+    let cleaned = phone.replace(/\D/g, '');
     
-    if (type === 'whatsapp') {
-      window.open(`https://wa.me/${sale.customer_phone}?text=${encodedText}`, '_blank');
-    } else if (type === 'sms') {
-      window.open(`sms:${sale.customer_phone}?body=${encodedText}`, '_blank');
-    } else if (type === 'email') {
-      window.open(`mailto:?subject=Bill from ${settings.shop_name}&body=${encodedText}`, '_blank');
+    // If it starts with 0, remove it (common in some formats)
+    if (cleaned.startsWith('0')) {
+      cleaned = cleaned.substring(1);
+    }
+    
+    // If it's 10 digits, assume India (+91)
+    if (cleaned.length === 10) {
+      return `91${cleaned}`;
+    }
+    
+    // If it's already 12 digits and starts with 91, it's likely already formatted
+    return cleaned;
+  };
+
+  const generatePDFBlob = async (sale: Sale): Promise<Blob | null> => {
+    const element = document.getElementById('printable-bill');
+    if (!element) {
+      alert("Printable element not found");
+      return null;
+    }
+
+    // Create a container for the clone to ensure it's rendered correctly
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.left = '-9999px';
+    container.style.top = '0';
+    container.style.width = '210mm'; // A4 width
+    container.style.backgroundColor = 'white';
+    document.body.appendChild(container);
+
+    // Clone the element
+    const clone = element.cloneNode(true) as HTMLElement;
+    clone.classList.remove('hidden', 'print:block');
+    clone.style.display = 'block';
+    clone.style.width = '100%';
+    
+    // Add a style override to the clone to avoid oklch issues in html2canvas
+    const styleOverride = document.createElement('style');
+    styleOverride.innerHTML = `
+      * { 
+        color-scheme: light !important;
+      }
+      .text-black { color: #000000 !important; }
+      .bg-white { background-color: #ffffff !important; }
+      .bg-[#f8fafc] { background-color: #f8fafc !important; }
+      .border-black { border-color: #000000 !important; }
+      .border-[#e2e8f0] { border-color: #e2e8f0 !important; }
+      .text-[#475569] { color: #475569 !important; }
+      .text-[#dc2626] { color: #dc2626 !important; }
+      .border-[#f1f5f9] { border-color: #f1f5f9 !important; }
+      .text-[#64748b] { color: #64748b !important; }
+      .text-slate-100 { color: #f1f5f9 !important; }
+      .text-slate-200 { color: #e2e8f0 !important; }
+      .text-slate-300 { color: #cbd5e1 !important; }
+      .text-slate-400 { color: #94a3b8 !important; }
+      .text-slate-500 { color: #64748b !important; }
+      .text-slate-600 { color: #475569 !important; }
+      .text-slate-700 { color: #334155 !important; }
+      .text-slate-800 { color: #1e293b !important; }
+      .text-slate-900 { color: #0f172a !important; }
+      .bg-slate-50 { background-color: #f8fafc !important; }
+      .bg-slate-100 { background-color: #f1f5f9 !important; }
+      .border-slate-100 { border-color: #f1f5f9 !important; }
+      .border-slate-200 { border-color: #e2e8f0 !important; }
+      .text-nursery-green { color: #2d5a27 !important; }
+      .bg-nursery-green { background-color: #2d5a27 !important; }
+    `;
+    clone.appendChild(styleOverride);
+    
+    container.appendChild(clone);
+
+    try {
+      // Use html2canvas to capture the element
+      // We use a small delay to ensure the clone is rendered
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      const canvas = await html2canvas(clone, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        windowWidth: 794,
+        // Ignore elements that might cause issues
+        ignoreElements: (element) => {
+          return element.tagName === 'SVG';
+        }
+      });
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.95);
+      
+      // Create PDF
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      const imgProps = pdf.getImageProperties(imgData);
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      
+      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+      const pdfBlob = pdf.output('blob');
+      
+      // Cleanup
+      document.body.removeChild(container);
+      return pdfBlob;
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      if (document.body.contains(container)) document.body.removeChild(container);
+      return null;
+    }
+  };
+
+  const downloadBill = async (sale: Sale) => {
+    const pdfBlob = await generatePDFBlob(sale);
+    if (!pdfBlob) {
+      alert("Failed to generate PDF");
+      return;
+    }
+    const fileName = `${sale.customer_name || 'Customer'}.pdf`;
+    const url = URL.createObjectURL(pdfBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const shareBill = async (type: 'whatsapp' | 'email' | 'sms', sale: Sale) => {
+    const pdfBlob = await generatePDFBlob(sale);
+    
+    if (!pdfBlob) {
+      alert("PDF generation failed. Sharing as text instead.");
+      // Text fallback
+      const billText = `*${settings.shop_name}*\nBill No: ${sale.id}\nTotal: ₹${sale.final_amount}\nThank you!`;
+      const encodedText = encodeURIComponent(billText);
+      if (type === 'whatsapp') {
+        const whatsappNumber = formatWhatsAppNumber(sale.customer_phone || '');
+        window.open(`https://wa.me/${whatsappNumber}?text=${encodedText}`, '_blank');
+      }
+      else if (type === 'sms') window.open(`sms:${sale.customer_phone}?body=${encodedText}`, '_blank');
+      else if (type === 'email') window.open(`mailto:?subject=Bill from ${settings.shop_name}&body=${encodedText}`, '_blank');
+      return;
+    }
+
+    try {
+      const fileName = "Agam Nursery.pdf";
+      const file = new File([pdfBlob], fileName, { type: "application/pdf" });
+
+      const whatsappNumber = formatWhatsAppNumber(sale.customer_phone || '');
+
+      // For WhatsApp, if we have a number, we might want to go direct
+      if (type === 'whatsapp' && whatsappNumber) {
+        // We'll download the PDF first so it's in their "Recent" files
+        const url = URL.createObjectURL(pdfBlob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        // Then open WhatsApp direct chat
+        const billText = `*${settings.shop_name}*\nBill No: ${sale.id}\nTotal: ₹${sale.final_amount}`;
+        window.open(`https://wa.me/${whatsappNumber}?text=${encodeURIComponent(billText)}`, '_blank');
+        return;
+      }
+
+      // Try Web Share API for other types or if no WhatsApp number
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: `Bill from ${settings.shop_name}`,
+            text: `Bill No: ${sale.id} - Total: ₹${sale.final_amount}`,
+          });
+          return;
+        } catch (shareError) {
+          console.log("Share cancelled or failed", shareError);
+        }
+      }
+      
+      // Fallback: Download the PDF
+      const url = URL.createObjectURL(pdfBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // Open WhatsApp/SMS/Email with message
+      const billText = `*${settings.shop_name}*\nBill No: ${sale.id}\nTotal: ₹${sale.final_amount}`;
+      const encodedText = encodeURIComponent(billText);
+
+      if (type === 'whatsapp') {
+        const whatsappNumber = formatWhatsAppNumber(sale.customer_phone || '');
+        window.open(`https://wa.me/${whatsappNumber}?text=${encodedText}`, '_blank');
+      } else if (type === 'sms') {
+        window.open(`sms:${sale.customer_phone}?body=${encodedText}`, '_blank');
+      } else if (type === 'email') {
+        window.open(`mailto:?subject=Bill from ${settings.shop_name}&body=${encodedText}`, '_blank');
+      }
+
+      alert("PDF generated! If it didn't share automatically, please attach the downloaded file.");
+    } catch (error) {
+      console.error("Error sharing PDF:", error);
+      alert("Sharing failed.");
     }
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-nursery-light">
-      {/* Header */}
-      <header className="bg-nursery-green text-white p-4 flex items-center justify-between sticky top-0 z-40 shadow-md">
+    <>
+      <div className="min-h-screen flex flex-col bg-nursery-light print:hidden">
+        {/* Header */}
+        <header className="bg-nursery-green text-white p-4 flex items-center justify-between sticky top-0 z-40 shadow-md">
         <div className="relative">
           <button 
             onClick={() => setShowMobileMenu(!showMobileMenu)}
@@ -461,7 +652,68 @@ ${settings.phone}
                               >
                                 -
                               </button>
-                              <span className="w-6 text-center font-bold text-sm">{item.quantity}</span>
+                              
+                              {editingQuantityId === item.id ? (
+                                <input
+                                  type="number"
+                                  autoFocus
+                                  value={tempQuantity}
+                                  onChange={(e) => setTempQuantity(e.target.value)}
+                                  onBlur={() => {
+                                    const newQty = parseInt(tempQuantity);
+                                    if (!isNaN(newQty) && newQty >= 1) {
+                                      updateQuantity(item.id, newQty);
+                                    }
+                                    setEditingQuantityId(null);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      const newQty = parseInt(tempQuantity);
+                                      if (!isNaN(newQty) && newQty >= 1) {
+                                        updateQuantity(item.id, newQty);
+                                      }
+                                      setEditingQuantityId(null);
+                                    }
+                                  }}
+                                  className="w-10 text-center font-bold text-sm border-b border-nursery-green focus:outline-none p-0 bg-transparent"
+                                />
+                              ) : (
+                                <span 
+                                  className="w-8 text-center font-bold text-sm cursor-pointer select-none"
+                                  onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    setEditingQuantityId(item.id);
+                                    setTempQuantity(item.quantity.toString());
+                                  }}
+                                  onTouchStart={(e) => {
+                                    const target = e.currentTarget;
+                                    const timer = setTimeout(() => {
+                                      setEditingQuantityId(item.id);
+                                      setTempQuantity(item.quantity.toString());
+                                    }, 600);
+                                    target.setAttribute('data-timer', timer.toString());
+                                  }}
+                                  onTouchEnd={(e) => {
+                                    const timer = e.currentTarget.getAttribute('data-timer');
+                                    if (timer) clearTimeout(parseInt(timer));
+                                  }}
+                                  onMouseDown={(e) => {
+                                    const target = e.currentTarget;
+                                    const timer = setTimeout(() => {
+                                      setEditingQuantityId(item.id);
+                                      setTempQuantity(item.quantity.toString());
+                                    }, 600);
+                                    target.setAttribute('data-timer', timer.toString());
+                                  }}
+                                  onMouseUp={(e) => {
+                                    const timer = e.currentTarget.getAttribute('data-timer');
+                                    if (timer) clearTimeout(parseInt(timer));
+                                  }}
+                                >
+                                  {item.quantity}
+                                </span>
+                              )}
+
                               <button 
                                 onClick={() => updateQuantity(item.id, item.quantity + 1)}
                                 className="w-6 h-6 rounded-md bg-white border border-slate-200 flex items-center justify-center hover:bg-slate-100"
@@ -891,7 +1143,17 @@ ${settings.phone}
                 <p className="text-xs text-slate-400 mt-2">Bill No: #{lastGeneratedSale.id}</p>
               </div>
 
-              <p className="text-sm font-bold text-slate-400 uppercase mb-4 tracking-widest">Share Bill via</p>
+              <div className="flex justify-between items-center mb-4">
+                <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Share Bill via</p>
+                <button 
+                  onClick={() => downloadBill(lastGeneratedSale)}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-nursery-green hover:text-white transition-all text-xs font-bold"
+                  title="Download PDF"
+                >
+                  <Download size={16} />
+                  Download PDF
+                </button>
+              </div>
               
               <div className="grid grid-cols-2 gap-4">
                 <button 
@@ -1027,6 +1289,12 @@ ${settings.phone}
 
               <div className="flex gap-3">
                 <button 
+                  onClick={() => downloadBill(selectedSale)}
+                  className="flex-1 btn-secondary justify-center border-slate-200 hover:bg-slate-50"
+                >
+                  <Download size={18} /> Download PDF
+                </button>
+                <button 
                   onClick={() => shareBill('whatsapp', selectedSale)}
                   className="flex-1 btn-primary justify-center bg-green-600 hover:bg-green-700"
                 >
@@ -1043,71 +1311,6 @@ ${settings.phone}
           </div>
         )}
       </AnimatePresence>
-
-      {/* Printable Bill (Hidden) */}
-      <div id="printable-bill" className="hidden">
-        {(lastGeneratedSale || selectedSale) && (
-          <div className="max-w-md mx-auto p-8 border border-slate-200">
-            <div className="text-center mb-8">
-              <h1 className="text-2xl font-bold uppercase">{settings.shop_name}</h1>
-              <p className="text-sm">{settings.address}</p>
-              <p className="text-sm">Phone: {settings.phone}</p>
-              {settings.gst_number && <p className="text-sm">GST: {settings.gst_number}</p>}
-            </div>
-
-            <div className="flex justify-between mb-6 text-sm">
-              <div>
-                <p><strong>Bill No:</strong> #{(lastGeneratedSale || selectedSale)?.id}</p>
-                <p><strong>Date:</strong> {new Date((lastGeneratedSale || selectedSale)?.created_at || '').toLocaleString()}</p>
-              </div>
-              <div className="text-right">
-                <p><strong>Customer:</strong> {(lastGeneratedSale || selectedSale)?.customer_name || 'Walk-in'}</p>
-                <p><strong>Phone:</strong> {(lastGeneratedSale || selectedSale)?.customer_phone || 'N/A'}</p>
-              </div>
-            </div>
-
-            <table className="w-full text-sm mb-6 border-collapse">
-              <thead>
-                <tr className="border-y border-slate-200">
-                  <th className="py-2 text-left">Item</th>
-                  <th className="py-2 text-center">Qty</th>
-                  <th className="py-2 text-right">Price</th>
-                  <th className="py-2 text-right">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(lastGeneratedSale || selectedSale)?.items.map((item, idx) => (
-                  <tr key={idx} className="border-b border-slate-100">
-                    <td className="py-2">{item.name}</td>
-                    <td className="py-2 text-center">{item.quantity}</td>
-                    <td className="py-2 text-right">₹{item.price}</td>
-                    <td className="py-2 text-right">₹{item.total}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            <div className="space-y-1 text-sm">
-              <div className="flex justify-between">
-                <span>Subtotal:</span>
-                <span>₹{(lastGeneratedSale || selectedSale)?.total_amount}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Discount:</span>
-                <span>-₹{(lastGeneratedSale || selectedSale)?.discount}</span>
-              </div>
-              <div className="flex justify-between font-bold text-lg pt-2 border-t border-slate-200">
-                <span>Grand Total:</span>
-                <span>₹{(lastGeneratedSale || selectedSale)?.final_amount}</span>
-              </div>
-            </div>
-
-            <div className="mt-12 text-center text-xs italic text-slate-500">
-              Thank you for shopping with us!
-            </div>
-          </div>
-        )}
-      </div>
 
       {/* Export Modal */}
       <AnimatePresence>
@@ -1173,5 +1376,75 @@ ${settings.phone}
         )}
       </AnimatePresence>
     </div>
+
+    {/* Printable Bill (Hidden in UI, Visible in Print) */}
+    <div id="printable-bill" className="hidden print:block bg-white text-black p-0 m-0">
+      {(lastGeneratedSale || selectedSale) && (
+        <div className="w-full max-w-4xl mx-auto p-10 text-black">
+          <div className="text-center mb-10 border-b-2 border-black pb-8">
+            <h1 className="text-4xl font-bold uppercase tracking-tight mb-2">{settings.shop_name}</h1>
+            <p className="text-lg leading-relaxed">{settings.address}</p>
+            <p className="text-lg">Phone: {settings.phone}</p>
+            {settings.gst_number && <p className="text-lg font-bold mt-2">GSTIN: {settings.gst_number}</p>}
+          </div>
+
+          <div className="flex justify-between mb-10 text-lg">
+            <div className="space-y-1">
+              <p><strong>Bill No:</strong> #{(lastGeneratedSale || selectedSale)?.id}</p>
+              <p><strong>Date:</strong> {new Date((lastGeneratedSale || selectedSale)?.created_at || '').toLocaleString()}</p>
+            </div>
+            <div className="text-right space-y-1">
+              <p><strong>Customer:</strong> {(lastGeneratedSale || selectedSale)?.customer_name || 'Walk-in'}</p>
+              <p><strong>Phone:</strong> {(lastGeneratedSale || selectedSale)?.customer_phone || 'N/A'}</p>
+              <p className="max-w-[300px]"><strong>Address:</strong> {(lastGeneratedSale || selectedSale)?.customer_address || 'N/A'}</p>
+            </div>
+          </div>
+
+          <table className="w-full text-lg mb-10 border-collapse">
+            <thead>
+              <tr className="border-y-2 border-black bg-[#f8fafc]">
+                <th className="py-4 px-2 text-left">Item Description</th>
+                <th className="py-4 px-2 text-center">Quantity</th>
+                <th className="py-4 px-2 text-right">Unit Price</th>
+                <th className="py-4 px-2 text-right">Total Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(lastGeneratedSale || selectedSale)?.items.map((item, idx) => (
+                <tr key={idx} className="border-b border-[#e2e8f0]">
+                  <td className="py-4 px-2 font-medium">{item.name}</td>
+                  <td className="py-4 px-2 text-center">{item.quantity}</td>
+                  <td className="py-4 px-2 text-right">₹{item.price}</td>
+                  <td className="py-4 px-2 text-right font-bold">₹{item.total}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div className="flex justify-end">
+            <div className="w-full max-w-xs space-y-3 text-lg">
+              <div className="flex justify-between">
+                <span className="text-[#475569]">Subtotal:</span>
+                <span>₹{(lastGeneratedSale || selectedSale)?.total_amount}</span>
+              </div>
+              <div className="flex justify-between text-[#dc2626]">
+                <span>Discount:</span>
+                <span>-₹{(lastGeneratedSale || selectedSale)?.discount}</span>
+              </div>
+              <div className="flex justify-between font-bold text-2xl pt-4 border-t-2 border-black">
+                <span>Grand Total:</span>
+                <span>₹{(lastGeneratedSale || selectedSale)?.final_amount}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-20 pt-10 border-t border-[#f1f5f9] text-center">
+            <p className="text-xl font-serif italic mb-2">Thank you for shopping with us!</p>
+            <p className="text-sm text-[#64748b] uppercase tracking-widest">Please visit again</p>
+          </div>
+        </div>
+      )}
+    </div>
+    </>
   );
 }

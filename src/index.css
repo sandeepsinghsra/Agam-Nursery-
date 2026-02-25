@@ -12,7 +12,7 @@
 
 @layer base {
   body {
-    @apply bg-nursery-light text-slate-900 font-sans;
+    @apply bg-nursery-light text-[#0f172a] font-sans;
   }
 }
 
@@ -25,29 +25,16 @@
 }
 
 .btn-secondary {
-  @apply bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-50 transition-all flex items-center gap-2 font-medium;
+  @apply bg-white border border-[#e2e8f0] text-[#334155] px-4 py-2 rounded-lg hover:bg-slate-50 transition-all flex items-center gap-2 font-medium;
 }
 
 @media print {
-  body * {
-    visibility: hidden;
+  @page {
+    margin: 0;
+    size: auto;
   }
-  #printable-bill {
-    display: block !important;
-    visibility: visible !important;
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    padding: 20px;
+  body {
     background: white !important;
-    color: black !important;
-  }
-  #printable-bill, #printable-bill * {
-    visibility: visible !important;
-  }
-  .no-print {
-    display: none !important;
   }
 }
 
