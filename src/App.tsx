@@ -22,8 +22,24 @@ import {
   Printer,
   Calendar,
   MoreVertical,
-  Menu
+  Menu,
+  Tag,
+  TrendingUp,
+  BarChart3,
+  Maximize,
+  Minimize
 } from 'lucide-react';
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer,
+  AreaChart,
+  Area
+} from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -58,6 +74,10 @@ export default function App() {
   const [showMoreShareOptions, setShowMoreShareOptions] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [showItemDiscountModal, setShowItemDiscountModal] = useState(false);
+  const [showIncomeModal, setShowIncomeModal] = useState(false);
+  const [incomeRange, setIncomeRange] = useState<'today' | 'weekly' | 'monthly' | 'yearly' | 'all'>('weekly');
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const [lastGeneratedSale, setLastGeneratedSale] = useState<Sale | null>(null);
 
@@ -72,7 +92,25 @@ export default function App() {
 
   useEffect(() => {
     fetchData();
+    
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch((err) => {
+        console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+      });
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      }
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -146,11 +184,11 @@ export default function App() {
     if (existing) {
       setCart(cart.map(item => 
         item.id === product.id 
-          ? { ...item, quantity: item.quantity + 1, total: (item.quantity + 1) * item.price }
+          ? { ...item, quantity: item.quantity + 1, total: ((item.quantity + 1) * item.price) - ((item.quantity + 1) * (item.discount || 0)) }
           : item
       ));
     } else {
-      setCart([...cart, { ...product, quantity: 1, total: product.price }]);
+      setCart([...cart, { ...product, quantity: 1, total: product.price, discount: 0 }]);
     }
     setManualTotal(null);
   };
@@ -164,14 +202,24 @@ export default function App() {
     if (qty < 1) return;
     setCart(cart.map(item => 
       item.id === id 
-        ? { ...item, quantity: qty, total: qty * item.price }
+        ? { ...item, quantity: qty, total: (qty * item.price) - (qty * (item.discount || 0)) }
         : item
     ));
     setManualTotal(null);
   };
 
-  const subtotal = useMemo(() => cart.reduce((sum, item) => sum + item.total, 0), [cart]);
-  const calculatedTotal = subtotal - discount;
+  const updateItemDiscount = (id: number, itemDiscount: number) => {
+    setCart(cart.map(item => 
+      item.id === id 
+        ? { ...item, discount: itemDiscount, total: (item.quantity * item.price) - (item.quantity * itemDiscount) }
+        : item
+    ));
+    setManualTotal(null);
+  };
+
+  const subtotal = useMemo(() => cart.reduce((sum, item) => sum + (item.price * item.quantity), 0), [cart]);
+  const itemDiscountsTotal = useMemo(() => cart.reduce((sum, item) => sum + ((item.discount || 0) * item.quantity), 0), [cart]);
+  const calculatedTotal = subtotal - discount - itemDiscountsTotal;
   const finalTotal = manualTotal !== null ? manualTotal : calculatedTotal;
 
   const generateBill = async () => {
@@ -182,7 +230,7 @@ export default function App() {
       customer_phone: customerPhone,
       customer_address: customerAddress,
       total_amount: subtotal,
-      discount: discount,
+      discount: discount + itemDiscountsTotal,
       final_amount: finalTotal,
       items: cart
     };
@@ -422,6 +470,96 @@ export default function App() {
     link.click();
     document.body.removeChild(link);
   };
+
+  const incomeStats = useMemo(() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const lastWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+    const lastYear = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+
+    const stats = {
+      today: 0,
+      weekly: 0,
+      monthly: 0,
+      yearly: 0,
+      all: 0
+    };
+
+    sales.forEach(sale => {
+      const date = new Date(sale.created_at);
+      stats.all += sale.final_amount;
+      if (date >= today) stats.today += sale.final_amount;
+      if (date >= lastWeek) stats.weekly += sale.final_amount;
+      if (date >= lastMonth) stats.monthly += sale.final_amount;
+      if (date >= lastYear) stats.yearly += sale.final_amount;
+    });
+
+    return stats;
+  }, [sales]);
+
+  const chartData = useMemo(() => {
+    const now = new Date();
+    const data: { name: string; amount: number }[] = [];
+
+    if (incomeRange === 'today') {
+      // Show last 24 hours
+      for (let i = 23; i >= 0; i--) {
+        const d = new Date(now.getTime() - i * 60 * 60 * 1000);
+        const hour = d.getHours();
+        const amount = sales.reduce((sum, s) => {
+          const sd = new Date(s.created_at);
+          return (sd.toDateString() === d.toDateString() && sd.getHours() === hour) ? sum + s.final_amount : sum;
+        }, 0);
+        data.push({ name: `${hour}:00`, amount });
+      }
+    } else if (incomeRange === 'weekly') {
+      // Last 7 days
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+        const dateStr = d.toDateString();
+        const amount = sales.reduce((sum, s) => {
+          return new Date(s.created_at).toDateString() === dateStr ? sum + s.final_amount : sum;
+        }, 0);
+        data.push({ name: d.toLocaleDateString('en-IN', { weekday: 'short' }), amount });
+      }
+    } else if (incomeRange === 'monthly') {
+      // Last 30 days (grouped by 5 days)
+      for (let i = 5; i >= 0; i--) {
+        const end = new Date(now.getTime() - i * 5 * 24 * 60 * 60 * 1000);
+        const start = new Date(end.getTime() - 5 * 24 * 60 * 60 * 1000);
+        const amount = sales.reduce((sum, s) => {
+          const sd = new Date(s.created_at);
+          return (sd > start && sd <= end) ? sum + s.final_amount : sum;
+        }, 0);
+        data.push({ name: `${start.getDate()}-${end.getDate()} ${end.toLocaleString('default', { month: 'short' })}`, amount });
+      }
+    } else if (incomeRange === 'yearly') {
+      // Last 12 months
+      for (let i = 11; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const month = d.getMonth();
+        const year = d.getFullYear();
+        const amount = sales.reduce((sum, s) => {
+          const sd = new Date(s.created_at);
+          return (sd.getMonth() === month && sd.getFullYear() === year) ? sum + s.final_amount : sum;
+        }, 0);
+        data.push({ name: d.toLocaleString('default', { month: 'short' }), amount });
+      }
+    } else {
+      // All time (by year)
+      const years = Array.from(new Set(sales.map(s => new Date(s.created_at).getFullYear()))).sort();
+      if (years.length === 0) years.push(now.getFullYear());
+      years.forEach(year => {
+        const amount = sales.reduce((sum, s) => {
+          return new Date(s.created_at).getFullYear() === year ? sum + s.final_amount : sum;
+        }, 0);
+        data.push({ name: year.toString(), amount });
+      });
+    }
+
+    return data;
+  }, [sales, incomeRange]);
 
   const shareBill = async (type: 'whatsapp' | 'email' | 'sms', sale: Sale) => {
     const pdfBlob = await generatePDFBlob(sale);
@@ -787,7 +925,16 @@ export default function App() {
                         <span className="font-medium">₹{subtotal}</span>
                       </div>
                       <div className="flex justify-between items-center text-sm">
-                        <span className="text-slate-500">Discount (₹)</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-500">Discount (₹)</span>
+                          <button 
+                            onClick={() => setShowItemDiscountModal(true)}
+                            className="p-1 rounded-md hover:bg-nursery-green/10 text-nursery-green transition-colors"
+                            title="Set Per-Item Discount"
+                          >
+                            <Tag size={14} />
+                          </button>
+                        </div>
                         <input 
                           type="number" 
                           value={discount}
@@ -917,6 +1064,12 @@ export default function App() {
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
                 <h2 className="font-serif text-3xl font-bold">Sales History</h2>
                 <div className="flex flex-wrap gap-2">
+                  <button 
+                    onClick={() => setShowIncomeModal(true)}
+                    className="btn-secondary bg-nursery-green/10 text-nursery-green border-nursery-green/20 hover:bg-nursery-green/20"
+                  >
+                    <TrendingUp size={18} /> Income
+                  </button>
                   <button 
                     onClick={() => setShowExportModal(true)}
                     className="btn-secondary"
@@ -1376,6 +1529,191 @@ export default function App() {
         )}
       </AnimatePresence>
     </div>
+
+    {/* Income Analysis Modal */}
+    <AnimatePresence>
+      {showIncomeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+            className="glass-card p-8 max-w-4xl w-full bg-white shadow-2xl overflow-y-auto max-h-[90vh]"
+          >
+            <div className="flex justify-between items-center mb-8">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-nursery-green/10 rounded-2xl flex items-center justify-center text-nursery-green">
+                  <BarChart3 size={24} />
+                </div>
+                <div>
+                  <h2 className="font-serif text-2xl font-bold text-nursery-green">Income Analysis</h2>
+                  <p className="text-xs text-slate-400">Track your nursery's financial performance</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowIncomeModal(false)}
+                className="p-2 hover:bg-slate-100 rounded-full transition-all"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Chart Section */}
+            <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 mb-8">
+              <div className="h-[300px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chartData}>
+                    <defs>
+                      <linearGradient id="colorAmount" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#2d5a27" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#2d5a27" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <XAxis 
+                      dataKey="name" 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fill: '#64748b', fontSize: 12 }}
+                      dy={10}
+                    />
+                    <YAxis 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fill: '#64748b', fontSize: 12 }}
+                      tickFormatter={(value) => `₹${value}`}
+                    />
+                    <Tooltip 
+                      contentStyle={{ 
+                        backgroundColor: '#fff', 
+                        borderRadius: '12px', 
+                        border: 'none', 
+                        boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' 
+                      }}
+                      formatter={(value: number) => [`₹${value}`, 'Income']}
+                    />
+                    <Area 
+                      type="monotone" 
+                      dataKey="amount" 
+                      stroke="#2d5a27" 
+                      strokeWidth={3}
+                      fillOpacity={1} 
+                      fill="url(#colorAmount)" 
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Range Selector */}
+              <div className="flex flex-wrap justify-center gap-2 mt-8">
+                {(['today', 'weekly', 'monthly', 'yearly', 'all'] as const).map((range) => (
+                  <button
+                    key={range}
+                    onClick={() => setIncomeRange(range)}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${
+                      incomeRange === range 
+                        ? 'bg-nursery-green text-white shadow-lg shadow-nursery-green/20' 
+                        : 'bg-white text-slate-500 hover:bg-slate-100 border border-slate-200'
+                    }`}
+                  >
+                    {range}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Summary Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Today</p>
+                <p className="text-lg font-bold text-nursery-green">₹{incomeStats.today}</p>
+              </div>
+              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Weekly</p>
+                <p className="text-lg font-bold text-nursery-green">₹{incomeStats.weekly}</p>
+              </div>
+              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Monthly</p>
+                <p className="text-lg font-bold text-nursery-green">₹{incomeStats.monthly}</p>
+              </div>
+              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Yearly</p>
+                <p className="text-lg font-bold text-nursery-green">₹{incomeStats.yearly}</p>
+              </div>
+              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm col-span-2 md:col-span-1">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">All Time</p>
+                <p className="text-lg font-bold text-nursery-green">₹{incomeStats.all}</p>
+              </div>
+            </div>
+
+            <button 
+              onClick={() => setShowIncomeModal(false)}
+              className="btn-primary w-full justify-center mt-4"
+            >
+              Close Analysis
+            </button>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+
+    {/* Item Discount Modal */}
+    <AnimatePresence>
+      {showItemDiscountModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+            className="glass-card p-8 max-w-md w-full bg-white shadow-2xl"
+          >
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="font-serif text-2xl font-bold text-nursery-green">Item Discounts</h2>
+              <button 
+                onClick={() => setShowItemDiscountModal(false)}
+                className="p-2 hover:bg-slate-100 rounded-full transition-all"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <p className="text-sm text-slate-500 mb-6">Set discount amount per unit for each item in the cart.</p>
+
+            <div className="space-y-4 max-h-[40vh] overflow-y-auto pr-2 mb-8">
+              {cart.map(item => (
+                <div key={item.id} className="flex items-center justify-between gap-4 p-3 rounded-xl bg-slate-50 border border-slate-100">
+                  <div className="flex-1">
+                    <p className="font-medium text-sm">{item.name}</p>
+                    <p className="text-[10px] text-slate-400">Price: ₹{item.price} • Qty: {item.quantity}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400">₹</span>
+                    <input 
+                      type="number"
+                      placeholder="0"
+                      value={item.discount || ''}
+                      onChange={(e) => updateItemDiscount(item.id, parseFloat(e.target.value) || 0)}
+                      className="w-16 text-right py-1 px-2 text-sm border-b border-nursery-green focus:outline-none bg-transparent"
+                    />
+                    <span className="text-[10px] text-slate-400">/unit</span>
+                  </div>
+                </div>
+              ))}
+              {cart.length === 0 && (
+                <p className="text-center py-4 text-slate-400 italic">No items in cart</p>
+              )}
+            </div>
+
+            <button 
+              onClick={() => setShowItemDiscountModal(false)}
+              className="btn-primary w-full justify-center"
+            >
+              Done
+            </button>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
 
     {/* Printable Bill (Hidden in UI, Visible in Print) */}
     <div id="printable-bill" className="hidden print:block bg-white text-black p-0 m-0">

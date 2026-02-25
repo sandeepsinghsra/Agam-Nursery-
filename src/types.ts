@@ -19,6 +19,7 @@ export interface SaleItem {
   price: number;
   quantity: number;
   total: number;
+  discount?: number;
 }
 
 export interface Sale {
