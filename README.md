@@ -6,7 +6,7 @@
 
 This contains everything you need to run your app locally.
 
-View your app in AI Studio: https://ai.studio/apps/5aad8cac-c5dc-4e77-9c56-7322d9951474
+View your app in AI Studio: 
 
 ## Run Locally
 
@@ -15,6 +15,6 @@ View your app in AI Studio: https://ai.studio/apps/5aad8cac-c5dc-4e77-9c56-7322d
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+2. Set the `GEMINI_API_KEY` in [.env.local]() to your Gemini API key
 3. Run the app:
    `npm run dev`
