@@ -28,6 +28,29 @@
   @apply bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-50 transition-all flex items-center gap-2 font-medium;
 }
 
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #printable-bill {
+    display: block !important;
+    visibility: visible !important;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 20px;
+    background: white !important;
+    color: black !important;
+  }
+  #printable-bill, #printable-bill * {
+    visibility: visible !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+
 input, select {
   @apply border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-nursery-green/20 focus:border-nursery-green transition-all;
 }

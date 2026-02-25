@@ -36,6 +36,17 @@ db.exec(`
   );
 `);
 
+// Migration: Add customer_address to sales if it doesn't exist
+const tableInfo = db.prepare("PRAGMA table_info(sales)").all() as any[];
+const hasAddressColumn = tableInfo.some(col => col.name === 'customer_address');
+if (!hasAddressColumn) {
+  try {
+    db.prepare("ALTER TABLE sales ADD COLUMN customer_address TEXT").run();
+  } catch (e) {
+    console.error("Migration failed:", e);
+  }
+}
+
 // Insert default settings if not exists
 const settingsCount = db.prepare("SELECT COUNT(*) as count FROM settings").get() as { count: number };
 if (settingsCount.count === 0) {

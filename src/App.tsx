@@ -19,13 +19,17 @@ import {
   Check,
   X,
   ChevronRight,
-  Printer
+  Printer,
+  Calendar,
+  MoreVertical,
+  Menu
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, Settings, SaleItem, Sale } from './types';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'billing' | 'products' | 'history' | 'settings'>('billing');
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [settings, setSettings] = useState<Settings>({
     shop_name: 'Agam Nursery',
@@ -39,7 +43,7 @@ export default function App() {
   // Billing State
   const [cart, setCart] = useState<SaleItem[]>([]);
   const [customerName, setCustomerName] = useState('');
-  const [customerPhone, setCustomerPhone] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('+91');
   const [customerAddress, setCustomerAddress] = useState('');
   const [discount, setDiscount] = useState(0);
   const [manualTotal, setManualTotal] = useState<number | null>(null);
@@ -47,7 +51,17 @@ export default function App() {
   
   // Share Modal State
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showMoreShareOptions, setShowMoreShareOptions] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const [lastGeneratedSale, setLastGeneratedSale] = useState<Sale | null>(null);
+
+  // History Filters
+  const [historySearch, setHistorySearch] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [showDateFilters, setShowDateFilters] = useState(false);
 
   // Product Form State
   const [newProduct, setNewProduct] = useState({ name: '', price: '', category: '' });
@@ -189,7 +203,7 @@ export default function App() {
         
         setCart([]);
         setCustomerName('');
-        setCustomerPhone('');
+        setCustomerPhone('+91');
         setCustomerAddress('');
         setDiscount(0);
         setManualTotal(null);
@@ -200,10 +214,76 @@ export default function App() {
     }
   };
 
+  const exportCSV = (range: '1day' | '1month' | '6months' | 'all') => {
+    const now = new Date();
+    let filteredSales = sales;
+
+    if (range !== 'all') {
+      const cutoff = new Date();
+      if (range === '1day') cutoff.setDate(now.getDate() - 1);
+      if (range === '1month') cutoff.setMonth(now.getMonth() - 1);
+      if (range === '6months') cutoff.setMonth(now.getMonth() - 6);
+      
+      filteredSales = sales.filter(sale => new Date(sale.created_at) >= cutoff);
+    }
+
+    if (filteredSales.length === 0) {
+      alert("No data found for the selected range.");
+      return;
+    }
+
+    const headers = ["Bill No", "Date", "Customer Name", "Phone", "Address", "Total Amount", "Discount", "Final Amount", "Items"];
+    const rows = filteredSales.map(sale => [
+      sale.id,
+      new Date(sale.created_at).toLocaleString(),
+      sale.customer_name || "Walk-in",
+      `'${sale.customer_phone || "N/A"}`, // Added single quote prefix to force string in Excel/CSV
+      sale.customer_address || "N/A",
+      sale.total_amount,
+      sale.discount,
+      sale.final_amount,
+      sale.items.map(i => `${i.name}(${i.quantity})`).join("; ")
+    ]);
+
+    const csvContent = [
+      headers.join(","),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(","))
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Agam_Nursery_Sales_${range}_${now.toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setShowExportModal(false);
+  };
+
+  const handlePrint = () => {
+    window.print();
+  };
+
   const filteredProducts = products.filter(p => 
     p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     p.category?.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const filteredSales = useMemo(() => {
+    return sales.filter(sale => {
+      const matchesSearch = 
+        (sale.customer_name?.toLowerCase() || '').includes(historySearch.toLowerCase()) ||
+        (sale.customer_phone || '').includes(historySearch);
+      
+      const saleDate = new Date(sale.created_at);
+      const matchesStart = !startDate || saleDate >= new Date(startDate);
+      const matchesEnd = !endDate || saleDate <= new Date(endDate + 'T23:59:59');
+
+      return matchesSearch && matchesStart && matchesEnd;
+    });
+  }, [sales, historySearch, startDate, endDate]);
 
   const shareBill = (type: 'whatsapp' | 'email' | 'sms', sale: Sale) => {
     const billText = `
@@ -237,56 +317,80 @@ ${settings.phone}
   };
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row">
-      {/* Sidebar */}
-      <nav className="w-full md:w-64 bg-nursery-green text-white p-6 flex flex-col gap-8">
+    <div className="min-h-screen flex flex-col bg-nursery-light">
+      {/* Header */}
+      <header className="bg-nursery-green text-white p-4 flex items-center justify-between sticky top-0 z-40 shadow-md">
+        <div className="relative">
+          <button 
+            onClick={() => setShowMobileMenu(!showMobileMenu)}
+            className="p-2 hover:bg-white/10 rounded-xl transition-all"
+          >
+            <MoreVertical size={24} />
+          </button>
+
+          <AnimatePresence>
+            {showMobileMenu && (
+              <>
+                <div 
+                  className="fixed inset-0 z-40" 
+                  onClick={() => setShowMobileMenu(false)} 
+                />
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                  className="absolute left-0 mt-2 w-56 glass-card bg-white shadow-xl z-50 overflow-hidden border border-slate-100"
+                >
+                  <div className="p-2 flex flex-col gap-1">
+                    <button 
+                      onClick={() => { setActiveTab('billing'); setShowMobileMenu(false); }}
+                      className={`flex items-center gap-3 p-3 rounded-xl transition-all text-sm ${activeTab === 'billing' ? 'bg-nursery-green text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+                    >
+                      <ShoppingCart size={18} />
+                      <span className="font-medium">Billing</span>
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('products'); setShowMobileMenu(false); }}
+                      className={`flex items-center gap-3 p-3 rounded-xl transition-all text-sm ${activeTab === 'products' ? 'bg-nursery-green text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+                    >
+                      <Plus size={18} />
+                      <span className="font-medium">Products</span>
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('history'); setShowMobileMenu(false); }}
+                      className={`flex items-center gap-3 p-3 rounded-xl transition-all text-sm ${activeTab === 'history' ? 'bg-nursery-green text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+                    >
+                      <History size={18} />
+                      <span className="font-medium">Sales History</span>
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('settings'); setShowMobileMenu(false); }}
+                      className={`flex items-center gap-3 p-3 rounded-xl transition-all text-sm ${activeTab === 'settings' ? 'bg-nursery-green text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+                    >
+                      <SettingsIcon size={18} />
+                      <span className="font-medium">Settings</span>
+                    </button>
+                  </div>
+                  <div className="bg-slate-50 p-3 border-t border-slate-100">
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Shop Info</p>
+                    <p className="mt-1 font-serif italic text-xs text-slate-600">{settings.shop_name}</p>
+                  </div>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+        </div>
+
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
-            <ShoppingCart className="text-white" />
+          <h1 className="font-serif text-lg font-bold tracking-tight">Agam Nursery</h1>
+          <div className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center">
+            <ShoppingCart className="text-white" size={18} />
           </div>
-          <h1 className="font-serif text-xl font-bold tracking-tight">Agam Nursery</h1>
         </div>
-
-        <div className="flex flex-col gap-2">
-          <button 
-            onClick={() => setActiveTab('billing')}
-            className={`flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'billing' ? 'bg-white/20 shadow-inner' : 'hover:bg-white/10'}`}
-          >
-            <ShoppingCart size={20} />
-            <span className="font-medium">Billing</span>
-          </button>
-          <button 
-            onClick={() => setActiveTab('products')}
-            className={`flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'products' ? 'bg-white/20 shadow-inner' : 'hover:bg-white/10'}`}
-          >
-            <Plus size={20} />
-            <span className="font-medium">Products</span>
-          </button>
-          <button 
-            onClick={() => setActiveTab('history')}
-            className={`flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'history' ? 'bg-white/20 shadow-inner' : 'hover:bg-white/10'}`}
-          >
-            <History size={20} />
-            <span className="font-medium">Sales History</span>
-          </button>
-          <button 
-            onClick={() => setActiveTab('settings')}
-            className={`flex items-center gap-3 p-3 rounded-xl transition-all ${activeTab === 'settings' ? 'bg-white/20 shadow-inner' : 'hover:bg-white/10'}`}
-          >
-            <SettingsIcon size={20} />
-            <span className="font-medium">Settings</span>
-          </button>
-        </div>
-
-        <div className="mt-auto pt-6 border-t border-white/10">
-          <p className="text-xs text-white/60 font-medium uppercase tracking-widest">Shop Info</p>
-          <p className="mt-2 font-serif italic">{settings.shop_name}</p>
-          <p className="text-sm text-white/80">{settings.phone}</p>
-        </div>
-      </nav>
+      </header>
 
       {/* Main Content */}
-      <main className="flex-1 p-4 md:p-8 overflow-y-auto bg-nursery-light">
+      <main className="flex-1 p-4 md:p-8 overflow-y-auto">
         <AnimatePresence mode="wait">
           {activeTab === 'billing' && (
             <motion.div 
@@ -399,7 +503,16 @@ ${settings.phone}
                             type="text" 
                             placeholder="Phone" 
                             value={customerPhone}
-                            onChange={(e) => setCustomerPhone(e.target.value)}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val.startsWith('+91')) {
+                                setCustomerPhone(val);
+                              } else if (val === '' || val === '+') {
+                                setCustomerPhone('+91');
+                              } else {
+                                setCustomerPhone('+91' + val.replace(/^\+91/, ''));
+                              }
+                            }}
                             className="text-sm"
                           />
                         </div>
@@ -549,64 +662,137 @@ ${settings.phone}
               exit={{ opacity: 0, x: -20 }}
               className="max-w-6xl mx-auto"
             >
-              <div className="flex justify-between items-center mb-8">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
                 <h2 className="font-serif text-3xl font-bold">Sales History</h2>
-                <div className="flex gap-2">
-                  <button className="btn-secondary">
+                <div className="flex flex-wrap gap-2">
+                  <button 
+                    onClick={() => setShowExportModal(true)}
+                    className="btn-secondary"
+                  >
                     <Download size={18} /> Export CSV
                   </button>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-4">
-                {sales.map(sale => (
-                  <div key={sale.id} className="glass-card p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 hover:shadow-md transition-all">
-                    <div className="flex items-center gap-6">
-                      <div className="w-12 h-12 bg-nursery-green/10 rounded-2xl flex items-center justify-center text-nursery-green font-bold text-lg">
-                        #{sale.id}
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-lg">{sale.customer_name || 'Walk-in Customer'}</h3>
-                        <p className="text-sm text-slate-500 flex items-center gap-2">
-                          <Smartphone size={14} /> {sale.customer_phone || 'N/A'}
-                          <span className="mx-2">•</span>
-                          {new Date(sale.created_at).toLocaleString()}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-4 md:gap-8">
-                      <div className="text-right">
-                        <p className="text-xs font-bold text-slate-400 uppercase">Final Amount</p>
-                        <p className="text-xl font-serif font-bold text-nursery-green">₹{sale.final_amount}</p>
-                      </div>
-                      
-                      <div className="flex gap-2">
-                        <button 
-                          onClick={() => shareBill('whatsapp', sale)}
-                          className="p-3 bg-green-50 text-green-600 rounded-xl hover:bg-green-100 transition-all"
-                          title="Share on WhatsApp"
-                        >
-                          <MessageCircle size={20} />
-                        </button>
-                        <button 
-                          onClick={() => shareBill('sms', sale)}
-                          className="p-3 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 transition-all"
-                          title="Send SMS"
-                        >
-                          <Smartphone size={20} />
-                        </button>
-                        <button 
-                          onClick={() => shareBill('email', sale)}
-                          className="p-3 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition-all"
-                          title="Send Email"
-                        >
-                          <Mail size={20} />
-                        </button>
-                      </div>
-                    </div>
+              {/* Filters */}
+              <div className="glass-card p-4 mb-8 flex flex-col gap-4">
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <input 
+                      type="text" 
+                      placeholder="Search name or phone..." 
+                      className="w-full pl-10"
+                      value={historySearch}
+                      onChange={(e) => setHistorySearch(e.target.value)}
+                    />
                   </div>
-                ))}
+                  <button 
+                    onClick={() => setShowDateFilters(!showDateFilters)}
+                    className={`p-2.5 rounded-lg border transition-all flex items-center gap-2 ${showDateFilters ? 'bg-nursery-green text-white border-nursery-green' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+                    title="Filter by Date"
+                  >
+                    <Calendar size={18} className={showDateFilters ? 'text-white' : 'text-slate-400'} />
+                    <span className="text-sm font-medium hidden sm:inline">Calendar</span>
+                  </button>
+                </div>
+
+                <AnimatePresence>
+                  {showDateFilters && (
+                    <motion.div 
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-100">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">From Date</label>
+                          <input 
+                            type="date" 
+                            className="w-full text-sm py-1.5"
+                            value={startDate}
+                            onChange={(e) => setStartDate(e.target.value)}
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">To Date</label>
+                          <input 
+                            type="date" 
+                            className="w-full text-sm py-1.5"
+                            value={endDate}
+                            onChange={(e) => setEndDate(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4">
+                {filteredSales.length === 0 ? (
+                  <div className="glass-card p-12 text-center text-slate-400">
+                    <History size={48} className="mx-auto mb-4 opacity-20" />
+                    <p>No sales found matching your filters.</p>
+                  </div>
+                ) : (
+                  filteredSales.map(sale => (
+                    <div 
+                      key={sale.id} 
+                      onClick={() => {
+                        setSelectedSale(sale);
+                        setShowDetailsModal(true);
+                      }}
+                      className="glass-card p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 hover:shadow-md transition-all cursor-pointer border-l-4 border-l-transparent hover:border-l-nursery-green"
+                    >
+                      <div className="flex items-center gap-6">
+                        <div className="w-12 h-12 bg-nursery-green/10 rounded-2xl flex items-center justify-center text-nursery-green font-bold text-lg">
+                          #{sale.id}
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="font-bold text-lg">{sale.customer_name || 'Walk-in Customer'}</h3>
+                          <div className="flex flex-col gap-1 mt-1">
+                            <p className="text-sm text-slate-500 flex items-center gap-2">
+                              <Smartphone size={14} /> {sale.customer_phone || 'N/A'}
+                              <span className="mx-2">•</span>
+                              {new Date(sale.created_at).toLocaleString()}
+                            </p>
+                            {sale.customer_address && (
+                              <p className="text-xs text-slate-400 flex items-center gap-2">
+                                <ChevronRight size={12} /> {sale.customer_address}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-4 md:gap-8">
+                        <div className="text-right">
+                          <p className="text-xs font-bold text-slate-400 uppercase">Final Amount</p>
+                          <p className="text-xl font-serif font-bold text-nursery-green">₹{sale.final_amount}</p>
+                        </div>
+                        
+                        <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                          <button 
+                            onClick={() => shareBill('whatsapp', sale)}
+                            className="p-3 bg-green-50 text-green-600 rounded-xl hover:bg-green-100 transition-all"
+                            title="Share on WhatsApp"
+                          >
+                            <MessageCircle size={20} />
+                          </button>
+                          <button 
+                            onClick={() => shareBill('sms', sale)}
+                            className="p-3 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 transition-all"
+                            title="Send SMS"
+                          >
+                            <Smartphone size={20} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </motion.div>
           )}
@@ -707,7 +893,7 @@ ${settings.phone}
 
               <p className="text-sm font-bold text-slate-400 uppercase mb-4 tracking-widest">Share Bill via</p>
               
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 gap-4">
                 <button 
                   onClick={() => shareBill('whatsapp', lastGeneratedSale)}
                   className="flex flex-col items-center gap-2 p-4 rounded-2xl bg-green-50 text-green-600 hover:bg-green-100 transition-all border border-green-100"
@@ -716,26 +902,271 @@ ${settings.phone}
                   <span className="text-xs font-bold">WhatsApp</span>
                 </button>
                 <button 
-                  onClick={() => shareBill('sms', lastGeneratedSale)}
-                  className="flex flex-col items-center gap-2 p-4 rounded-2xl bg-blue-50 text-blue-600 hover:bg-blue-100 transition-all border border-blue-100"
+                  onClick={handlePrint}
+                  className="flex flex-col items-center gap-2 p-4 rounded-2xl bg-slate-800 text-white hover:bg-slate-900 transition-all border border-slate-800"
                 >
-                  <Smartphone size={24} />
-                  <span className="text-xs font-bold">SMS</span>
+                  <Printer size={24} />
+                  <span className="text-xs font-bold">Print Bill</span>
+                </button>
+              </div>
+
+              <div className="mt-4">
+                {!showMoreShareOptions ? (
+                  <button 
+                    onClick={() => setShowMoreShareOptions(true)}
+                    className="w-full py-3 flex items-center justify-center gap-2 text-slate-500 hover:text-nursery-green transition-all text-sm font-bold"
+                  >
+                    <MoreVertical size={16} /> More Options
+                  </button>
+                ) : (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-100"
+                  >
+                    <button 
+                      onClick={() => shareBill('sms', lastGeneratedSale)}
+                      className="flex flex-col items-center gap-2 p-4 rounded-2xl bg-blue-50 text-blue-600 hover:bg-blue-100 transition-all border border-blue-100"
+                    >
+                      <Smartphone size={24} />
+                      <span className="text-xs font-bold">SMS</span>
+                    </button>
+                    <button 
+                      onClick={() => shareBill('email', lastGeneratedSale)}
+                      className="flex flex-col items-center gap-2 p-4 rounded-2xl bg-slate-50 text-slate-600 hover:bg-slate-100 transition-all border border-slate-100"
+                    >
+                      <Mail size={24} />
+                      <span className="text-xs font-bold">Email</span>
+                    </button>
+                  </motion.div>
+                )}
+              </div>
+
+              <button 
+                onClick={() => { setShowShareModal(false); setShowMoreShareOptions(false); }}
+                className="w-full mt-8 py-3 text-slate-500 font-medium hover:text-slate-800 transition-all"
+              >
+                Close
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Bill Details Modal */}
+      <AnimatePresence>
+        {showDetailsModal && selectedSale && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="glass-card p-8 max-w-2xl w-full bg-white shadow-2xl overflow-y-auto max-h-[90vh]"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h2 className="font-serif text-2xl font-bold text-nursery-green">Bill Details</h2>
+                  <p className="text-xs text-slate-400">Bill No: #{selectedSale.id} • {new Date(selectedSale.created_at).toLocaleString()}</p>
+                </div>
+                <button 
+                  onClick={() => setShowDetailsModal(false)}
+                  className="p-2 hover:bg-slate-100 rounded-full transition-all"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Customer Information</p>
+                    <p className="font-bold text-lg mt-1">{selectedSale.customer_name || 'Walk-in Customer'}</p>
+                    <p className="text-sm text-slate-600 flex items-center gap-2 mt-1">
+                      <Smartphone size={14} /> {selectedSale.customer_phone || 'N/A'}
+                    </p>
+                    {selectedSale.customer_address && (
+                      <p className="text-sm text-slate-600 flex items-center gap-2 mt-1">
+                        <ChevronRight size={14} /> {selectedSale.customer_address}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="bg-nursery-green/5 p-4 rounded-2xl border border-nursery-green/10">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Payment Summary</p>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-500">Subtotal</span>
+                      <span className="font-medium">₹{selectedSale.total_amount}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-500">Discount</span>
+                      <span className="font-medium text-red-500">-₹{selectedSale.discount}</span>
+                    </div>
+                    <div className="flex justify-between pt-2 border-t border-nursery-green/10">
+                      <span className="font-bold text-nursery-green">Total Paid</span>
+                      <span className="font-serif font-bold text-xl text-nursery-green">₹{selectedSale.final_amount}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mb-8">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Items Purchased</p>
+                <div className="space-y-3">
+                  {selectedSale.items.map((item, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
+                      <div>
+                        <p className="font-medium">{item.name}</p>
+                        <p className="text-xs text-slate-500">₹{item.price} x {item.quantity}</p>
+                      </div>
+                      <p className="font-bold">₹{item.total}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => shareBill('whatsapp', selectedSale)}
+                  className="flex-1 btn-primary justify-center bg-green-600 hover:bg-green-700"
+                >
+                  <MessageCircle size={18} /> WhatsApp
                 </button>
                 <button 
-                  onClick={() => shareBill('email', lastGeneratedSale)}
-                  className="flex flex-col items-center gap-2 p-4 rounded-2xl bg-slate-50 text-slate-600 hover:bg-slate-100 transition-all border border-slate-100"
+                  onClick={handlePrint}
+                  className="flex-1 btn-primary justify-center bg-slate-800 hover:bg-slate-900"
                 >
-                  <Mail size={24} />
-                  <span className="text-xs font-bold">Email</span>
+                  <Printer size={18} /> Print
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Printable Bill (Hidden) */}
+      <div id="printable-bill" className="hidden">
+        {(lastGeneratedSale || selectedSale) && (
+          <div className="max-w-md mx-auto p-8 border border-slate-200">
+            <div className="text-center mb-8">
+              <h1 className="text-2xl font-bold uppercase">{settings.shop_name}</h1>
+              <p className="text-sm">{settings.address}</p>
+              <p className="text-sm">Phone: {settings.phone}</p>
+              {settings.gst_number && <p className="text-sm">GST: {settings.gst_number}</p>}
+            </div>
+
+            <div className="flex justify-between mb-6 text-sm">
+              <div>
+                <p><strong>Bill No:</strong> #{(lastGeneratedSale || selectedSale)?.id}</p>
+                <p><strong>Date:</strong> {new Date((lastGeneratedSale || selectedSale)?.created_at || '').toLocaleString()}</p>
+              </div>
+              <div className="text-right">
+                <p><strong>Customer:</strong> {(lastGeneratedSale || selectedSale)?.customer_name || 'Walk-in'}</p>
+                <p><strong>Phone:</strong> {(lastGeneratedSale || selectedSale)?.customer_phone || 'N/A'}</p>
+              </div>
+            </div>
+
+            <table className="w-full text-sm mb-6 border-collapse">
+              <thead>
+                <tr className="border-y border-slate-200">
+                  <th className="py-2 text-left">Item</th>
+                  <th className="py-2 text-center">Qty</th>
+                  <th className="py-2 text-right">Price</th>
+                  <th className="py-2 text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(lastGeneratedSale || selectedSale)?.items.map((item, idx) => (
+                  <tr key={idx} className="border-b border-slate-100">
+                    <td className="py-2">{item.name}</td>
+                    <td className="py-2 text-center">{item.quantity}</td>
+                    <td className="py-2 text-right">₹{item.price}</td>
+                    <td className="py-2 text-right">₹{item.total}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div className="space-y-1 text-sm">
+              <div className="flex justify-between">
+                <span>Subtotal:</span>
+                <span>₹{(lastGeneratedSale || selectedSale)?.total_amount}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Discount:</span>
+                <span>-₹{(lastGeneratedSale || selectedSale)?.discount}</span>
+              </div>
+              <div className="flex justify-between font-bold text-lg pt-2 border-t border-slate-200">
+                <span>Grand Total:</span>
+                <span>₹{(lastGeneratedSale || selectedSale)?.final_amount}</span>
+              </div>
+            </div>
+
+            <div className="mt-12 text-center text-xs italic text-slate-500">
+              Thank you for shopping with us!
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Export Modal */}
+      <AnimatePresence>
+        {showExportModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="glass-card p-8 max-w-md w-full bg-white shadow-2xl"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="font-serif text-2xl font-bold text-nursery-green">Export Sales Data</h2>
+                <button 
+                  onClick={() => setShowExportModal(false)}
+                  className="p-2 hover:bg-slate-100 rounded-full transition-all"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <p className="text-sm text-slate-500 mb-6">Select the time range for which you want to download the sales report in CSV format.</p>
+              
+              <div className="flex flex-col gap-3">
+                <button 
+                  onClick={() => exportCSV('1day')}
+                  className="w-full p-4 rounded-xl border border-slate-100 hover:border-nursery-green hover:bg-nursery-green/5 transition-all text-left flex justify-between items-center group"
+                >
+                  <span className="font-medium group-hover:text-nursery-green">Last 24 Hours</span>
+                  <ChevronRight size={18} className="text-slate-300 group-hover:text-nursery-green" />
+                </button>
+                <button 
+                  onClick={() => exportCSV('1month')}
+                  className="w-full p-4 rounded-xl border border-slate-100 hover:border-nursery-green hover:bg-nursery-green/5 transition-all text-left flex justify-between items-center group"
+                >
+                  <span className="font-medium group-hover:text-nursery-green">Last 1 Month</span>
+                  <ChevronRight size={18} className="text-slate-300 group-hover:text-nursery-green" />
+                </button>
+                <button 
+                  onClick={() => exportCSV('6months')}
+                  className="w-full p-4 rounded-xl border border-slate-100 hover:border-nursery-green hover:bg-nursery-green/5 transition-all text-left flex justify-between items-center group"
+                >
+                  <span className="font-medium group-hover:text-nursery-green">Last 6 Months</span>
+                  <ChevronRight size={18} className="text-slate-300 group-hover:text-nursery-green" />
+                </button>
+                <button 
+                  onClick={() => exportCSV('all')}
+                  className="w-full p-4 rounded-xl border border-slate-100 hover:border-nursery-green hover:bg-nursery-green/5 transition-all text-left flex justify-between items-center group"
+                >
+                  <span className="font-medium group-hover:text-nursery-green">All Time Data</span>
+                  <ChevronRight size={18} className="text-slate-300 group-hover:text-nursery-green" />
                 </button>
               </div>
 
               <button 
-                onClick={() => setShowShareModal(false)}
+                onClick={() => setShowExportModal(false)}
                 className="w-full mt-8 py-3 text-slate-500 font-medium hover:text-slate-800 transition-all"
               >
-                Close
+                Cancel
               </button>
             </motion.div>
           </div>
