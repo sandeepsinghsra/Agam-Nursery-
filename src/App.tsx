@@ -90,8 +90,18 @@ export default function App() {
   // Product Form State
   const [newProduct, setNewProduct] = useState({ name: '', price: '', category: '' });
 
+  // Auth State
+  const [currentUser, setCurrentUser] = useState<string | null>(null);
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+
   useEffect(() => {
-    fetchData();
+    const savedUser = localStorage.getItem('nursery_current_user');
+    if (savedUser) {
+      setCurrentUser(savedUser);
+    }
     
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
@@ -112,21 +122,77 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    if (currentUser) {
+      fetchData();
+    }
+  }, [currentUser]);
+
+  const handleAuth = (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    
+    const usersStr = localStorage.getItem('nursery_users');
+    const users = usersStr ? JSON.parse(usersStr) : {};
+
+    if (authMode === 'signup') {
+      if (users[email]) {
+        setAuthError('Account already exists with this email.');
+        return;
+      }
+      users[email] = { password };
+      localStorage.setItem('nursery_users', JSON.stringify(users));
+      localStorage.setItem('nursery_current_user', email);
+      setCurrentUser(email);
+      
+      // Initialize default settings for new user
+      const defaultSettings = {
+        shop_name: 'Agam Nursery',
+        address: '',
+        phone: '',
+        email: email,
+        gst_number: ''
+      };
+      localStorage.setItem(`nursery_settings_${email}`, JSON.stringify(defaultSettings));
+      setSettings(defaultSettings);
+      setProducts([]);
+      setSales([]);
+      
+    } else {
+      if (!users[email] || users[email].password !== password) {
+        setAuthError('Invalid email or password.');
+        return;
+      }
+      localStorage.setItem('nursery_current_user', email);
+      setCurrentUser(email);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('nursery_current_user');
+    setCurrentUser(null);
+    setEmail('');
+    setPassword('');
+    setCart([]);
+    setProducts([]);
+    setSales([]);
+  };
+
   const fetchData = async () => {
+    if (!currentUser) return;
     try {
-      const [prodRes, setRes, salesRes] = await Promise.all([
-        fetch('/api/products'),
-        fetch('/api/settings'),
-        fetch('/api/sales')
-      ]);
+      // Use localStorage instead of API for static hosting compatibility
+      const storedProducts = localStorage.getItem(`nursery_products_${currentUser}`);
+      const storedSettings = localStorage.getItem(`nursery_settings_${currentUser}`);
+      const storedSales = localStorage.getItem(`nursery_sales_${currentUser}`);
+
+      if (storedProducts) setProducts(JSON.parse(storedProducts));
+      else setProducts([]);
       
-      const prodData = await prodRes.json();
-      const setData = await setRes.json();
-      const salesData = await salesRes.json();
+      if (storedSettings) setSettings(JSON.parse(storedSettings));
       
-      setProducts(prodData);
-      if (setData) setSettings(setData);
-      setSales(salesData.map((s: any) => ({ ...s, items: JSON.parse(s.items) })));
+      if (storedSales) setSales(JSON.parse(storedSales));
+      else setSales([]);
     } catch (error) {
       console.error("Error fetching data:", error);
     }
@@ -134,31 +200,33 @@ export default function App() {
 
   const addProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newProduct.name || !newProduct.price) return;
+    if (!newProduct.name || !newProduct.price || !currentUser) return;
     
     try {
-      const res = await fetch('/api/products', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newProduct.name,
-          price: parseFloat(newProduct.price),
-          category: newProduct.category
-        })
-      });
-      if (res.ok) {
-        setNewProduct({ name: '', price: '', category: '' });
-        fetchData();
-      }
+      const newId = products.length > 0 ? Math.max(...products.map(p => p.id)) + 1 : 1;
+      const productToAdd = {
+        id: newId,
+        name: newProduct.name,
+        price: parseFloat(newProduct.price),
+        category: newProduct.category
+      };
+      
+      const updatedProducts = [...products, productToAdd];
+      setProducts(updatedProducts);
+      localStorage.setItem(`nursery_products_${currentUser}`, JSON.stringify(updatedProducts));
+      
+      setNewProduct({ name: '', price: '', category: '' });
     } catch (error) {
       console.error("Error adding product:", error);
     }
   };
 
   const deleteProduct = async (id: number) => {
+    if (!currentUser) return;
     try {
-      await fetch(`/api/products/${id}`, { method: 'DELETE' });
-      fetchData();
+      const updatedProducts = products.filter(p => p.id !== id);
+      setProducts(updatedProducts);
+      localStorage.setItem(`nursery_products_${currentUser}`, JSON.stringify(updatedProducts));
     } catch (error) {
       console.error("Error deleting product:", error);
     }
@@ -166,12 +234,9 @@ export default function App() {
 
   const updateSettings = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentUser) return;
     try {
-      await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings)
-      });
+      localStorage.setItem(`nursery_settings_${currentUser}`, JSON.stringify(settings));
       alert("Settings updated successfully!");
     } catch (error) {
       console.error("Error updating settings:", error);
@@ -223,7 +288,7 @@ export default function App() {
   const finalTotal = manualTotal !== null ? manualTotal : calculatedTotal;
 
   const generateBill = async () => {
-    if (cart.length === 0) return;
+    if (cart.length === 0 || !currentUser) return;
     
     const saleData = {
       customer_name: customerName,
@@ -236,31 +301,26 @@ export default function App() {
     };
 
     try {
-      const res = await fetch('/api/sales', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(saleData)
-      });
+      const newId = sales.length > 0 ? Math.max(...sales.map(s => s.id)) + 1 : 1001;
+      const newSale: Sale = {
+        ...saleData,
+        id: newId,
+        created_at: new Date().toISOString()
+      };
       
-      if (res.ok) {
-        const { id } = await res.json();
-        const newSale: Sale = {
-          ...saleData,
-          id,
-          created_at: new Date().toISOString()
-        };
-        
-        setLastGeneratedSale(newSale);
-        setShowShareModal(true);
-        
-        setCart([]);
-        setCustomerName('');
-        setCustomerPhone('+91');
-        setCustomerAddress('');
-        setDiscount(0);
-        setManualTotal(null);
-        fetchData();
-      }
+      const updatedSales = [newSale, ...sales];
+      setSales(updatedSales);
+      localStorage.setItem(`nursery_sales_${currentUser}`, JSON.stringify(updatedSales));
+      
+      setLastGeneratedSale(newSale);
+      setShowShareModal(true);
+      
+      setCart([]);
+      setCustomerName('');
+      setCustomerPhone('+91');
+      setCustomerAddress('');
+      setDiscount(0);
+      setManualTotal(null);
     } catch (error) {
       console.error("Error generating bill:", error);
     }
@@ -644,6 +704,78 @@ export default function App() {
     }
   };
 
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-nursery-light p-4">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="glass-card p-8 max-w-md w-full bg-white shadow-2xl"
+        >
+          <div className="text-center mb-8">
+            <div className="w-16 h-16 bg-nursery-green/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <ShoppingCart className="text-nursery-green" size={32} />
+            </div>
+            <h1 className="font-serif text-3xl font-bold text-nursery-green">Agam Nursery</h1>
+            <p className="text-slate-500 mt-2">
+              {authMode === 'login' ? 'Sign in to your account' : 'Create a new account'}
+            </p>
+          </div>
+
+          <form onSubmit={handleAuth} className="flex flex-col gap-4">
+            {authError && (
+              <div className="p-3 bg-red-50 text-red-600 text-sm rounded-xl border border-red-100">
+                {authError}
+              </div>
+            )}
+            
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-bold text-slate-400 uppercase">Email</label>
+              <input 
+                type="email" 
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="your@email.com"
+                className="w-full"
+              />
+            </div>
+            
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-bold text-slate-400 uppercase">Password</label>
+              <input 
+                type="password" 
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full"
+              />
+            </div>
+
+            <button type="submit" className="btn-primary w-full justify-center mt-4 py-3">
+              {authMode === 'login' ? 'Sign In' : 'Create Account'}
+            </button>
+          </form>
+
+          <div className="mt-6 text-center">
+            <button 
+              onClick={() => {
+                setAuthMode(authMode === 'login' ? 'signup' : 'login');
+                setAuthError('');
+              }}
+              className="text-sm text-nursery-green hover:underline font-medium"
+            >
+              {authMode === 'login' 
+                ? "Don't have an account? Sign up" 
+                : "Already have an account? Sign in"}
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="min-h-screen flex flex-col bg-nursery-light print:hidden">
@@ -700,9 +832,17 @@ export default function App() {
                       <span className="font-medium">Settings</span>
                     </button>
                   </div>
-                  <div className="bg-slate-50 p-3 border-t border-slate-100">
-                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Shop Info</p>
-                    <p className="mt-1 font-serif italic text-xs text-slate-600">{settings.shop_name}</p>
+                  <div className="bg-slate-50 p-3 border-t border-slate-100 flex flex-col gap-2">
+                    <div>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Shop Info</p>
+                      <p className="mt-1 font-serif italic text-xs text-slate-600">{settings.shop_name}</p>
+                    </div>
+                    <button 
+                      onClick={handleLogout}
+                      className="text-xs text-red-500 font-medium hover:underline text-left mt-2"
+                    >
+                      Logout ({currentUser})
+                    </button>
                   </div>
                 </motion.div>
               </>
@@ -711,6 +851,13 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-3">
+          <button 
+            onClick={toggleFullscreen}
+            className="p-2 hover:bg-white/10 rounded-xl transition-all mr-2"
+            title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+          >
+            {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
+          </button>
           <h1 className="font-serif text-lg font-bold tracking-tight">Agam Nursery</h1>
           <div className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center">
             <ShoppingCart className="text-white" size={18} />
