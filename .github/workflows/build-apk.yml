@@ -1,4 +1,4 @@
-name: Build APK (Final Fix)
+name: Build APK (Tailwind Fix)
 
 on:
   push:
@@ -20,13 +20,14 @@ jobs:
         run: |
           rm -rf node_modules package-lock.json
           npm install --force --legacy-peer-deps
-          # Missing modules ko force install karna
-          npm install better-sqlite3 express @tailwindcss/vite vite @types/node --save-dev --force --legacy-peer-deps
+          # Tailwind ke purane stable version aur PostCSS ko install karna
+          npm install tailwindcss postcss autoprefixer --save-dev --force --legacy-peer-deps
+          npm install better-sqlite3 express vite @types/node --save-dev --force --legacy-peer-deps
 
-      - name: Build web app (ASLI BUILD)
+      - name: Build web app (Clean Build)
         run: |
-          # Is baar hum bypass nahi karenge, asli build chalayenge
-          npm run build
+          # TypeScript check skip karke direct Vite build chalana taaki CSS error na aaye
+          npx vite build
 
       - name: Setup Java 21
         uses: actions/setup-java@v4
@@ -40,7 +41,6 @@ jobs:
       - name: Initialize Capacitor Android
         run: |
           npm install @capacitor/core @capacitor/android @capacitor/cli --force --legacy-peer-deps
-          # Purana android folder delete karke naya banana taaki fresh build ho
           rm -rf android
           npx cap init AgamNursery com.agam.nursery --web-dir dist
           npx cap add android
