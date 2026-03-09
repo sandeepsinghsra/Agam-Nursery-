@@ -1,4 +1,4 @@
-name: Build APK (Master Fix)
+name: Build APK (Final Fix)
 
 on:
   push:
@@ -16,29 +16,29 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies (Force Install)
+      - name: Install Dependencies (Deep Fix)
         run: |
           rm -rf node_modules package-lock.json
-          # Sabse pehle core dependencies install karein
+          # Sabse pehle force install taaki dependency conflict na ho
           npm install --force --legacy-peer-deps
-          # Missing modules jo error de rahe hain, unhe manually add karein
+          # Missing Vite aur Tailwind plugins ko manually add karna
           npm install @tailwindcss/vite vite better-sqlite3 express @types/node --save-dev --force --legacy-peer-deps
 
-      - name: Build web app
+      - name: Build Web App
         run: |
-          # TypeScript errors ko ignore karke build nikalna
-          npx vite build || (echo "Vite failed, trying backup build..." && npm run build --if-present)
+          # TypeScript errors ko ignore karke direct Vite build
+          npx vite build
 
-      - name: Setup Java 21 (Required for your project)
+      - name: Setup Java 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '21'
+          java-version: '21' # Aapka project Java 21 maang raha hai
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Initialize Capacitor Android
+      - name: Initialize Capacitor
         run: |
           npm install @capacitor/core @capacitor/android @capacitor/cli --force --legacy-peer-deps
           rm -rf android
@@ -46,12 +46,12 @@ jobs:
           npx cap add android
           npx cap sync android
 
-      - name: Fix Kotlin & Gradle
+      - name: Fix Kotlin Duplicate Classes & Java Home
         run: |
-          # Java 21 compatibility force karna
+          # Gradle ko batana ki Java 21 hi use kare
           echo "org.gradle.java.home=$JAVA_HOME" >> android/gradle.properties
           
-          # Duplicate class fix
+          # Kotlin duplicate class error ka pakka ilaaj
           sed -i '/dependencies {/i \
           configurations.all {\
               resolutionStrategy.eachDependency { DependencyResolveDetails details -> \
