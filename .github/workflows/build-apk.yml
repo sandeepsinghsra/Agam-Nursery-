@@ -43,16 +43,28 @@ jobs:
           npx cap add android || true
           npx cap sync android
 
-      - name: Build APK (with Duplicate Class Fix)
+      - name: Fix Duplicate Kotlin Classes
+        run: |
+          # Ye script build.gradle mein 'ResolutionStrategy' add karegi taaki version clash khatam ho jaye
+          sed -i '/dependencies {/i \
+          configurations.all {\
+              resolutionStrategy.eachDependency { DependencyResolveDetails details -> \
+                  if (details.requested.group == "org.jetbrains.kotlin") {\
+                      details.useVersion "1.8.22"\
+                  }\
+              }\
+          }' android/app/build.gradle
+
+      - name: Build APK
         run: |
           cd android
           chmod +x gradlew
           export JAVA_HOME=$JAVA_HOME_21_X64
-          # Duplicate class error ko fix karne ke liye configurations
-          ./gradlew assembleDebug -Pandroid.useAndroidX=true -Pandroid.enableJetifier=true
+          ./gradlew assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Agam-Nursery-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
+          
