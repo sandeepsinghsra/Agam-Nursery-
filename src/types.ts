@@ -3,6 +3,7 @@ export interface Product {
   name: string;
   price: number;
   category?: string;
+  stock?: number | null;
 }
 
 export interface Settings {
@@ -32,4 +33,17 @@ export interface Sale {
   final_amount: number;
   items: SaleItem[];
   created_at: string;
+  payment_mode?: string;
+  is_credit?: boolean;
+}
+
+export interface Credit {
+  id: number;
+  sale_id: number;
+  customer_name: string;
+  customer_phone: string;
+  amount: number;
+  paid: number;
+  created_at: string;
+  notes?: string;
 }
