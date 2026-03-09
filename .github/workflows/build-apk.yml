@@ -1,4 +1,4 @@
-name: Build APK (Tailwind Fix)
+name: Build APK (Final Stability Fix)
 
 on:
   push:
@@ -16,24 +16,24 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies (Deep Clean)
+      - name: Install dependencies (Stable Version)
         run: |
           rm -rf node_modules package-lock.json
           npm install --force --legacy-peer-deps
-          # Tailwind ke purane stable version aur PostCSS ko install karna
-          npm install tailwindcss postcss autoprefixer --save-dev --force --legacy-peer-deps
-          npm install better-sqlite3 express vite @types/node --save-dev --force --legacy-peer-deps
+          # Tailwind ka wo version jo 'devSourcemap' error nahi deta
+          npm install @tailwindcss/vite@4.0.0-alpha.24 vite@5.0.0 --save-dev --force --legacy-peer-deps
+          npm install better-sqlite3 express @types/node --save-dev --force --legacy-peer-deps
 
-      - name: Build web app (Clean Build)
+      - name: Build web app
         run: |
-          # TypeScript check skip karke direct Vite build chalana taaki CSS error na aaye
-          npx vite build
+          # Sabse pehle static files generate karna
+          npm run build || npx vite build
 
-      - name: Setup Java 21
+      - name: Setup Java 17 (More Stable for Android)
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '21'
+          java-version: '17'
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -46,8 +46,12 @@ jobs:
           npx cap add android
           npx cap sync android
 
-      - name: Fix Duplicate Kotlin Classes
+      - name: Fix Kotlin & Java Version Clash
         run: |
+          # Java 17/21 compatibility fix
+          echo "org.gradle.java.home=$JAVA_HOME" >> android/gradle.properties
+          
+          # Kotlin duplicate class fix
           sed -i '/dependencies {/i \
           configurations.all {\
               resolutionStrategy.eachDependency { DependencyResolveDetails details -> \
@@ -61,12 +65,10 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          export JAVA_HOME=$JAVA_HOME_21_X64
           ./gradlew assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Agam-Nursery-Final-APK
+          name: Agam-Nursery-Working-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
-          
