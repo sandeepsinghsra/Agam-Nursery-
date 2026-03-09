@@ -27,11 +27,11 @@ jobs:
           echo "<html><body>Agam Nursery App</body></html>" > dist/index.html
           npx vite build || echo "Vite build failed but continuing..."
 
-      - name: Setup Java 17
+      - name: Setup Java 21 (Final Fix)
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -47,8 +47,8 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          # Java 17 environment variable set kar rahe hain
-          export JAVA_HOME=$JAVA_HOME_17_X64
+          # Java 21 environment set kar rahe hain
+          export JAVA_HOME=$JAVA_HOME_21_X64
           ./gradlew assembleDebug
 
       - name: Upload APK
