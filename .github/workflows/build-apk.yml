@@ -16,10 +16,10 @@ jobs:
         with:
           node-version: '18'
 
-      - name: Install dependencies (with Fix)
+      - name: Install dependencies (Forced Fix)
         run: |
-          npm install
-          npm install @tailwindcss/vite express better-sqlite3 --save-dev
+          npm install --force --legacy-peer-deps
+          npm install @tailwindcss/vite express better-sqlite3 --save-dev --force --legacy-peer-deps
 
       - name: Build web app
         run: npm run build
@@ -35,7 +35,7 @@ jobs:
 
       - name: Initialize Capacitor Android
         run: |
-          npm install @capacitor/core @capacitor/android @capacitor/cli
+          npm install @capacitor/core @capacitor/android @capacitor/cli --force --legacy-peer-deps
           npx cap init AgamNursery com.agam.nursery --web-dir dist --force
           npx cap add android || true
           npx cap sync android
